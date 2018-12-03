@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.googlecode.jsonrpc4j.JsonRpcService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.FactoryBean;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.support.BeanDefinitionBuilder;
@@ -33,10 +34,13 @@ public class AutoJsonRpcClientProxyCreator implements BeanFactoryPostProcessor, 
 	private static final Logger logger = LoggerFactory.getLogger(AutoJsonRpcClientProxyCreator.class);
 	private ApplicationContext applicationContext;
 	private String scanPackage;
-	private URL baseUrl;
 	private ObjectMapper objectMapper;
 	private String contentType;
-	
+	public String jsonRpcBaseUrlBeanName = "jsonRpcBaseUrl";
+
+	public static final String CLASSPATH_URL_PREFIX = "classpath*:";
+
+
 	@Override
 	public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) {
 		SimpleMetadataReaderFactory metadataReaderFactory = new SimpleMetadataReaderFactory(applicationContext);
@@ -74,11 +78,18 @@ public class AutoJsonRpcClientProxyCreator implements BeanFactoryPostProcessor, 
 	 * Registers a new proxy bean with the bean factory.
 	 */
 	private void registerJsonProxyBean(DefaultListableBeanFactory defaultListableBeanFactory, String className, String path) {
+		BeanDefinitionBuilder serviceURL = BeanDefinitionBuilder
+				.rootBeanDefinition(ServiceUrlFactoryBean.class)
+				.addPropertyValue("path",path)
+				.addPropertyReference("baseUrl",jsonRpcBaseUrlBeanName);
+
+
 		BeanDefinitionBuilder beanDefinitionBuilder = BeanDefinitionBuilder
 				.rootBeanDefinition(JsonProxyFactoryBean.class)
-				.addPropertyValue("serviceUrl", appendBasePath(path))
+				.addPropertyReference("serviceUrl", className + "-clientServiceUrl")
 				.addPropertyValue("serviceInterface", className);
-		
+
+
 		if (objectMapper != null) {
 			beanDefinitionBuilder.addPropertyValue("objectMapper", objectMapper);
 		}
@@ -86,28 +97,20 @@ public class AutoJsonRpcClientProxyCreator implements BeanFactoryPostProcessor, 
 		if (contentType != null) {
 			beanDefinitionBuilder.addPropertyValue("contentType", contentType);
 		}
-		
+
+		defaultListableBeanFactory.registerBeanDefinition(className + "-clientServiceUrl", serviceURL.getBeanDefinition());
 		defaultListableBeanFactory.registerBeanDefinition(className + "-clientProxy", beanDefinitionBuilder.getBeanDefinition());
 	}
 	
-	/**
-	 * Appends the base path to the path found in the interface.
-	 */
-	private String appendBasePath(String path) {
-		try {
-			return new URL(baseUrl, path).toString();
-		} catch (MalformedURLException e) {
-			throw new IllegalArgumentException(format("Cannot combine URLs '%s' and '%s' to valid URL.", baseUrl, path), e);
-		}
-	}
+
 	
 	@Override
 	public void setApplicationContext(ApplicationContext applicationContext) {
 		this.applicationContext = applicationContext;
 	}
 	
-	public void setBaseUrl(URL baseUrl) {
-		this.baseUrl = baseUrl;
+	public void setJsonRpcBaseUrlBeanName(String jsonRpcBaseUrlBeanName) {
+		this.jsonRpcBaseUrlBeanName = jsonRpcBaseUrlBeanName;
 	}
 	
 	public void setScanPackage(String scanPackage) {
@@ -121,4 +124,57 @@ public class AutoJsonRpcClientProxyCreator implements BeanFactoryPostProcessor, 
 	public void setContentType(String contextType) {
 		this.contentType = contextType;
 	}
+
+	public static class ServiceUrlFactoryBean implements FactoryBean<String>{
+
+		private URL baseUrl;
+
+		private String path;
+
+
+		/**
+		 * Appends the base path to the path found in the interface.
+		 */
+		private String appendBasePath() {
+			try {
+				return new URL(baseUrl, this.path).toString();
+			} catch (MalformedURLException e) {
+				throw new IllegalArgumentException(format("Cannot combine URLs '%s' and '%s' to valid URL.", baseUrl, path), e);
+			}
+		}
+
+
+		public URL getBaseUrl() {
+			return baseUrl;
+		}
+
+		public void setBaseUrl(URL baseUrl) {
+			this.baseUrl = baseUrl;
+		}
+
+		public String getPath() {
+			return path;
+		}
+
+		public void setPath(String path) {
+			this.path = path;
+		}
+
+		@Override
+		public String getObject() throws Exception {
+			return appendBasePath();
+		}
+
+		@Override
+		public Class<?> getObjectType() {
+			return String.class;
+		}
+
+		@Override
+		public boolean isSingleton() {
+			return true;
+		}
+	}
+
+
 }
